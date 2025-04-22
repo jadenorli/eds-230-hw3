@@ -1,0 +1,490 @@
+---
+title: "Informal Sensitivity Analysis of Modeled Almond Prices in Response to Climate Variation"
+author: "Jaden Orli"
+date: last-modified
+bibliography: 
+ - ../Code/references.bib
+execute: 
+  eval: true
+  message: false
+  warning: false 
+format:
+  html:
+    theme: minty
+    css: custom.css
+    toc: true
+    toc-title: "Table of Contents:"
+    toc-depth: 3
+    code-fold: false
+editor:
+  chunk_output_type: inline
+embed-resources: true
+---
+
+# I. Background
+
+This document implements a profit model developed for the almond yield anomaly in response to climate variables.The transfer function for this model is sourced from Lobell et al. 2006 which used data to build statistical models of tree crop yield for California that explored how climate variation (place and time) might influence yield [@lobell_2006]. The particular equation used, shown below, is from Table 2 listed under almonds for the crop type. 
+
+$$
+Y = -0.015 \cdot T_{n2} - 0.0046 \cdot T_{n2}^2 - 0.07 \cdot P_{1} + 0.0043 \cdot P_{1}^2 + 0.28
+$$
+The almond yield model calculates the annual almond yield anomaly for the input dates. The output of this model is then used in the almond profit model to adjust the baseline yield to an actual yield for each year. Additionally, this model will scale the actual yield the baseline price to calculate a final annual profit. An [conceptual model](#model) is outlined later in the workflow to further visualize the process. 
+
+The objective of this model is to predict almond profit based on climate inputs (monthly minimum temperature and total monthly precipitation) and assumed parameters values (baseline annual yield and baseline annual price). Then we want to [assess parameter uncertainty](#uncertain) and [identify key drivers](#drivers) of model dynamics. The values for baseline yield and baseline prices were interpreted from the UC Davis 2008 Sample Costs to Establish an Orchard and Produce Almonds [@ucdavis2008].
+
+# II. Set Up 
+
+Now we can begin to set up the environment for analysis. 
+
+## a) Load Libraries 
+
+First, we will clear the environment and load the necessary libraries. 
+
+```{r libraries}
+#this clears out the environment
+rm(list = ls())
+
+#load the necessary libraries 
+library(readr)
+library(here)
+library(tidyverse)
+library(kableExtra)
+library(ggtext)
+library(htmltools)
+library(calecopal)
+
+```
+
+
+## b) Read Data {#data}
+
+Then we will read in the climate data text file as a dataframe.
+
+```{r data}
+#read in the climate data as a dataframe 
+climate_data <- read_delim(here("Data", "clim.txt")) 
+
+```
+
+## c) Color Palettes
+
+Finally, we can establish a color palette for this project. 
+
+```{r}
+#create a color palette to use throughout the project
+kelp1 <- cal_palette(name = "kelp1", n = 50, type = "continuous")
+
+#create a named list of colors from the kelp1 palette
+colors <- c(fill = "#0D5C66",
+            median_profit = "#4E6934",
+            mean_profit = "#D22600")
+
+#create a color for baseline_price
+baseline_price <- "coral"
+
+#create a color for baseline_yield
+baseline_yield <- "mediumorchid"
+
+```
+
+
+# III. Annual Almond Profit
+
+After finishing to set up the work environment, we can begin to calculate the annual almond profit using our models.
+
+## a) Conceptual Model {#model}
+
+To help understand the [almond_yield function](#yield) and the [almond_yield_profit function](#profit), we developed a conceptual model to explain the processes that take place within these function. The schematic for the almond yield function is outlined below:
+
+![](../Images/Almond_Yield_Profit_Conceptual_Diagram.jpg)
+
+## b) Almond Yield Function {#yield}
+
+First, we will load the almond yield function to calculate the annual almond yield anomaly based on the climate variations for the years 1998 to 2010. 
+
+```{r functions}
+#load in the almond_yield function
+source(here("R", "almond_yield.R"))
+
+#view the format of the function 
+almond_yield
+
+```
+
+
+## c) Almond Yield Profit Function {#profit}
+
+Then we can load in the almond_yield_profit function to calculate the actual annual yield and the corresponding profit. This profit model assumes two parameter values, the baseline yield and the baseline price, 
+
+```{r}
+#load in the almond_yield function
+source(here("R", "almond_yield_profit.R"))
+
+#view the format of the function 
+almond_yield_profit
+
+```
+
+
+# IV. Informal Sensitivity Analysis
+
+After outlining the functions used in this workflow, we can run an informal sensitivity analysis to evaluate model reliability and determine which variables in the profit model drive the model dynamics. 
+
+## a) Set Up
+
+First we will set up the model by creating a dataframe with various combinations of parameter values for the baseline price and baseline yield. 
+
+### i) Define Inputs 
+
+These parameter values will be randomly sampled from a uniform distribution of values from a predetermined minimum and maximum range. The range for these values was derived from the 
+
+```{r}
+#set the seed for reproducibility
+set.seed(42)
+
+#define the number of simulations to use 
+n_samples <- 100
+
+#create a dataframe of sample parameter ranges for yield and price
+sensitivity_inputs <- tibble(baseline_yield = runif(n_samples, #randomly sample from a uniform distribution n times
+                                                    min = 1600, #minimum yield of 1600 lb/acre
+                                                    max = 3200), #maximum yield of 3200 lb/acre
+                             baseline_price = runif(n_samples, #randomly sample from a uniform distribution n times
+                                                    min = 1.0, #minimum price of 1 $/lb
+                                                    max = 2.3)) #maximum price of 2.3 $/lb
+
+```
+
+
+### ii) Profit Simulations 
+
+Then, for each combination of parameters in the dataframe generated above, a simulation was run to calculate the actual yield and profit for each year from 1998 to 2010. After running all 100 simulations, the data was then condensed into a single dataframe for easier visualization later. 
+
+```{r}
+#create a list of dataframes with the output of the various profit simulations using the sensitivity inputs from above
+profit_simulations <- pmap(sensitivity_inputs, #use pmap to iterate over the tibble of parameters
+                           function(baseline_yield, baseline_price) { #use the each row of the input tibble for a set of values for baseline_price and baseline_yield 
+  almond_yield_profit(climate_df = climate_data, #use the almond_yield_profit function with the climate data
+                      tmin_month = 2, #use Feb for the min temp month like Lobell et al 2006
+                      precip_month = 1, #use Jan for the precip month like Lobell et al 2006
+                      baseline_yield = baseline_yield, #use the baseline_yield from this iteration of simulations
+                      baseline_price = baseline_price) #use the baseline_price from this iteration of simulations
+})
+
+#create a dataframe with all the simulations from above
+profit_dfs <- map2_dfr(profit_simulations, #input the list of 100 simulations
+                       1:n_samples, #input a sequence of numbers from 1 to the number of simulations (n)
+                       ~ mutate(.x, #create a new dataframe with each simulation dataframe
+                                simulation = .y)) #add a column for the simulation number 
+
+```
+
+
+## b) Parameter Uncertainity {#uncertain}
+
+To asses the reliability of the model under uncertainty, we visualized the variation in calculated profit across all simulations over time. In each of the below figures, the boxplot shows the variation in the calculated profit across all the simulations for each year. Additionally, the [green line]{style="color:#4E6934;"} represents the annual median profit across all 100 simulations while the [red line]{style="color:#D22600;"} represents the annual mean profit across the simulations. 
+
+### i) Annual Profit Distributions
+
+We started by visualizing the annual variation in profit distributions for all of the years. 
+
+```{r}
+#create a summary dataframe with the median profit and mean profit for each year across all simulations
+profit_dfs_sum <- profit_dfs %>% #input the profits_df
+  group_by(year) %>% #group the simulations by year 
+  summarize("median_profit" = median(profit), #calculate the median profit
+            "mean_profit" = mean(profit)) #calculate the mean profit 
+
+#create a plot of the annual profit distributions for every year 
+profits_annual_sum <- ggplot(profit_dfs, aes(x = factor(year), y = profit)) + #plot profit for each year 
+  geom_boxplot(fill = colors["fill"], alpha = 0.5) + #use the fill color for the boxplots
+  geom_line(data = profit_dfs_sum, #draw a green line for the median profit
+            aes(x = factor(year), y = median_profit, color = "Median Profit", group = 1),
+            size = 0.7) +
+  geom_line(data = profit_dfs_sum, #draw a red line for the mean profit 
+            aes(x = factor(year), y = mean_profit, color = "Mean Profit", group = 1),
+            size = 0.5) +
+  scale_color_manual(name = "Summary Lines",
+                     values = c("Median Profit" = colors[["median_profit"]],
+                                "Mean Profit" = colors[["mean_profit"]])) +
+  labs(title = "Simulated Almond Profit Distributions Over Time",
+       subtitle = "Annual Profit Variability Across Parameter Uncertainty",
+       x = "Year", y = "Profit ($/acre)") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_minimal() +
+  theme(text = element_text(family = "Times New Roman"),
+        plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+        plot.subtitle = element_text(size = 12, hjust = 0.5),
+        axis.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 10),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        legend.position = "bottom",
+        legend.box.background = element_rect(color = "black", size = 0.7),
+        legend.title = element_text(face = "bold", size = 12),
+        legend.text = element_text(size = 10))
+    
+#view the output
+profits_annual_sum
+
+```
+
+However, due to the large variability in the calculated profit based on year, we facted the data into high, mid, and low profit levels for easier visualization. 
+
+```{r}
+#create a dataframe with the ranked years based on the above boxplots
+profit_facet <- profit_dfs %>% #input the profit_dfs
+  mutate(rank = case_when(year %in% c(1995, 1997, 2001, 2005, 2008, 2010) ~ "high", #these are high profit years
+                          year %in% c(1990, 1991, 1992, 1993, 1998, 2000, 2006, 2007) ~ "mid", #these are mid profit years
+                          year %in% c(1989, 1994, 1996, 1999, 2002, 2003, 2004, 2009) ~ "low")) #these are low profit years 
+
+#create a summary dataframe for median and mean by year and rank
+profit_facet_sum <- profit_facet %>% #input the profit_facet df 
+  group_by(rank, year) %>% #group the data by rank (high, mid, low) and year
+  summarize(median_profit = median(profit), #calculate median profit
+            mean_profit = mean(profit), #calculate mean profit 
+            .groups = "drop") #drop the groups 
+
+```
+
+
+Now we can visualize the annual profit variation across the various profit levels:
+
+### ii) High Profit Level {#high}
+
+```{r}
+#create a dataframe with the years with the highest profit
+profit_high <- profit_facet %>% #input the profit_dfs
+  filter(rank == "high") #select the years with high profit
+
+#create a summary dataframe for the high profit dataframe
+profit_high_sum <- profit_high %>% #input the profit_high
+  group_by(year) %>% #group the simulations by year 
+  summarize(median_profit = median(profit), #calculate the median profit
+            mean_profit = mean(profit)) #calculate the mean profit 
+
+#create a plot of the annual profit distributions for every year 
+profits_high_sum <- ggplot(profit_high, aes(x = factor(year), y = profit)) + #plot profit for each year 
+  geom_boxplot(fill = colors["fill"], alpha = 0.5) + #use the fill color for the boxplots
+  geom_line(data = profit_high_sum, #draw a green line for the median profit
+            aes(x = factor(year), y = median_profit, color = "Median Profit", group = 1),
+            size = 0.7) +
+  geom_line(data = profit_high_sum, #draw a red line for the mean profit 
+            aes(x = factor(year), y = mean_profit, color = "Mean Profit", group = 1),
+            size = 0.5) +
+  scale_color_manual(name = "Summary Lines",
+                     values = c("Median Profit" = colors[["median_profit"]],
+                                "Mean Profit" = colors[["mean_profit"]])) +
+  labs(title = "Simulated Almond Profit Distributions Over Time",
+       subtitle = "High Profit Level",
+       x = "Year", y = "Profit ($/acre)") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_minimal() +
+  theme(text = element_text(family = "Times New Roman"),
+        plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+        plot.subtitle = element_text(size = 12, hjust = 0.5),
+        axis.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 10),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        legend.position = "bottom",
+        legend.box.background = element_rect(color = "black", size = 0.7),
+        legend.title = element_text(face = "bold", size = 12),
+        legend.text = element_text(size = 10))
+
+#view the output
+profits_high_sum
+
+```
+
+### iii) Mid Profit Level {#mid}
+
+```{r}
+#create a dataframe with the years with the mid profit
+profit_mid <- profit_facet %>% #input the profit_dfs
+  filter(rank == "mid") #select the years with mid profit
+
+#create a summary dataframe for the profit_mid dataframe
+profit_mid_sum <- profit_mid %>% #input the profit_mid
+  group_by(year) %>% #group the simulations by year 
+  summarize(median_profit = median(profit), #calculate the median profit
+            mean_profit = mean(profit)) #calculate the mean profit 
+
+#create a plot of the annual profit distributions for every year 
+profits_mid_sum <- ggplot(profit_mid, aes(x = factor(year), y = profit)) + #plot profit for each year 
+  geom_boxplot(fill = colors["fill"], alpha = 0.5) + #use the fill color for the boxplots
+  geom_line(data = profit_mid_sum, #draw a green line for the median profit
+            aes(x = factor(year), y = median_profit, color = "Median Profit", group = 1),
+            size = 0.7) +
+  geom_line(data = profit_mid_sum, #draw a red line for the mean profit 
+            aes(x = factor(year), y = mean_profit, color = "Mean Profit", group = 1),
+            size = 0.5) +
+  scale_color_manual(name = "Summary Lines",
+                     values = c("Median Profit" = colors[["median_profit"]],
+                                "Mean Profit" = colors[["mean_profit"]])) +
+  labs(title = "Simulated Almond Profit Distributions Over Time",
+       subtitle = "Mid Profit Level",
+       x = "Year", y = "Profit ($/acre)") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_minimal() +
+  theme(text = element_text(family = "Times New Roman"),
+        plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+        plot.subtitle = element_text(size = 12, hjust = 0.5),
+        axis.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 10),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        legend.position = "bottom",
+        legend.box.background = element_rect(color = "black", size = 0.7),
+        legend.title = element_text(face = "bold", size = 12),
+        legend.text = element_text(size = 10))
+
+#view the output
+profits_mid_sum
+
+```
+
+
+### iv) Low Profit Level {#low}
+
+```{r}
+#create a dataframe with the years with the lowest profit
+profit_low <- profit_facet %>% #input the profit_dfs
+  filter(rank == "low") #select the years with low profit
+
+#create a summary dataframe for the profit_low dataframe
+profit_low_sum <- profit_low %>% #input the profit_low
+  group_by(year) %>% #group the simulations by year 
+  summarize(median_profit = median(profit), #calculate the median profit
+            mean_profit = mean(profit)) #calculate the mean profit 
+
+#create a plot of the annual profit distributions for every year 
+ggplot(profit_low, aes(x = factor(year), y = profit)) +
+  geom_boxplot(fill = colors["fill"], alpha = 0.5) + #use the fill color for the boxplots
+  geom_line(data = profit_low_sum, #draw a green line for the median profit
+            aes(x = factor(year), y = median_profit, color = "Median Profit", group = 1),
+            size = 0.7) +
+  geom_line(data = profit_low_sum, #draw a red line for the mean profit 
+            aes(x = factor(year), y = mean_profit, color = "Mean Profit", group = 1),
+            size = 0.5) +
+  scale_color_manual(name = "Summary Lines",
+                     values = c("Median Profit" = colors[["median_profit"]],
+                                "Mean Profit" = colors[["mean_profit"]])) +
+  labs(title = "Simulated Almond Profit Distributions Over Time",
+       subtitle = "Low Profit Level",
+       x = "Year", y = "Profit ($/acre)") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_minimal() +
+  theme(text = element_text(family = "Times New Roman"),
+        plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+        plot.subtitle = element_text(size = 12, hjust = 0.5),
+        axis.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 10),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        legend.position = "bottom",
+        legend.box.background = element_rect(color = "black", size = 0.7),
+        legend.title = element_text(face = "bold", size = 12),
+        legend.text = element_text(size = 10))
+
+
+```
+
+
+## c) Key Drivers {#drivers}
+
+Finally, we can explore the impact of the baseline price and baseline yield parameters on the model dynamics. In particular, we can evaluate if either of these parameters play a driving role in the model outcome. 
+
+```{r}
+#create a summary dataframe with the parameter combinations and mean profit for each simulation 
+profit_summary <- profit_dfs %>% #input the profit_dfs
+  group_by(simulation) %>% #group the data by simulation 
+  summarise(mean_profit = mean(profit)) %>% #calculate the mean_profit for each simulation
+  left_join(sensitivity_inputs %>% #add on the sensitivity inputs dataframe 
+              mutate(simulation = row_number()), #first add a simulation column
+            by = "simulation") #then join the two dataframes by this simulation column 
+
+```
+
+
+### i) Sensitivity to Baseline Price {#sensitive_price}
+
+First, we will visualize the models sensitivity to the baseline price parameter by plotting the relationship between the baseline price and mean profit for each simulation. 
+
+```{r}
+#create a plot of the profit sensitivity to baseline price
+profit_price <- ggplot(profit_summary, aes(x = baseline_price, y = mean_profit)) +
+  geom_point(color = baseline_price, size = 2, alpha = 0.7) +
+  geom_smooth(method = "loess", color = "black", se = FALSE, size = 0.7) +
+  labs(title = "Sensitivity of Profit to Baseline Price",
+       x = "Baseline Price ($/lb)",
+       y = "Mean Profit ($/acre)") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_minimal() +
+  theme(text = element_text(family = "Times New Roman"),
+        plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+        axis.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 10))
+
+#view the output
+profit_price
+
+```
+
+### ii) Sensitivity to Baseline Yield {#sensitive_yield}
+
+Then we will visualize the models sensitivity to the baseline yield parameter by plotting the relationship between the baseline price and mean profit for each simulation. 
+
+```{r}
+#create a plot of the profit sensitivity to baseline price
+profit_yield <- ggplot(profit_summary, aes(x = baseline_yield, y = mean_profit)) +
+  geom_point(color = baseline_yield, size = 2, alpha = 0.7) +
+  geom_smooth(method = "loess", color = "black", se = FALSE, size = 0.7) +
+  labs(title = "Sensitivity of Profit to Baseline Yield",
+       x = "Baseline Yield (lb/acre)",
+       y = "Mean Profit ($/acre)") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_minimal() +
+  theme(text = element_text(family = "Times New Roman"),
+        plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+        axis.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 10))
+
+#view the output
+profit_yield
+
+```
+
+### iii) Combined Visualization {#combined}
+
+Finally, we can examine a combined visualization in which the [above plot](#sensitive_yield) of baseline yield is colored by the changes in baseline price. 
+
+```{r}
+#create a combined parameter visualization 
+profit_combined <- ggplot(profit_summary, aes(x = baseline_yield, y = mean_profit)) +
+  geom_point(aes(color = baseline_price), size = 2, alpha = 0.8) +
+  scale_color_viridis_c(option = "B", name = "Baseline Price ($/lb)") +
+  labs(title = "Profit Sensitivity to Baseline Yield",
+       subtitle = "Colored by Baseline Price",
+       x = "Baseline Yield (lb/acre)",
+       y = "Mean Profit ($/acre)") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_minimal() +
+  theme(text = element_text(family = "Times New Roman"),
+        plot.title = element_text(face = "bold", size = 16, hjust = 0.5),
+        plot.subtitle = element_text(size = 12, hjust = 0.5),
+        axis.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 10),
+        legend.title = element_text(face = "bold", size = 11),
+        legend.box.background = element_rect(color = "black", size = 0.7),
+        legend.text = element_text(size = 10))
+
+#view the output
+profit_combined
+
+```
+
+# V. Discussion 
+
+Based on the sensitivity analysis we can conclude that our model is a reliable predictor of almond profit and that the baseline price is the driving parameter. From our parameter uncertainty analysis, we see that the data are fairly normally distributed with the median almost equal to the mean in most years across [high](#high), [mid](#mid), and [low](#low) profit returns. This means that there is less variability and risk associated with using this model to predict profit based on yield and climate variations making this a reliable model. Additionally, our key drivers analysis revealed that [baseline price](#sensitive_price) dominated the model dynamics while [baseline yield](#sensitive_yield) was not a strong predictor of profit. This is apparent in the [strong linear relationship](#sensitive_price) between baseline price and mean profit and the [noisy relationship](#sensitive_yield) between baseline yield and mean profit. The [combined visualization](#combined) highlights these relationships nicely together in a single plot. 
+
+# VI. References
+
+::: {#refs}
+:::
