@@ -1,1 +1,9 @@
-# eds-230-hw3
+Model of Almond Yield Anomaly in Response to Climate Variation
+================
+
+# Contents
+
+This repository (knitted HTML linked here:
+[almond_profit](https://jadenorli.github.io/eds-230-hw3/Code/EDS_230_HW3.html))
+implements a simple model of almond yield anomaly in response to climate
+variables.
