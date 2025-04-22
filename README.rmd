@@ -1,5 +1,5 @@
 ---
-title: "Model of Almond Yield Anomaly in Response to Climate Variation"
+title: "Informal Sensitivity Analysis of Modeled Almond Prices in Response to Climate Variation"
 output:
   github_document:
     toc: false
